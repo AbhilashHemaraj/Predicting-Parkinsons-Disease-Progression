@@ -1,3 +1,6 @@
+import tensorflow as tf
+from sklearn.metrics import mean_squared_error
+from itertools import tee
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -6,6 +9,8 @@ import matplotlib.pyplot as plt
 import matplotlib.style as style
 
 style.use('fivethirtyeight')
+
+
 class LinearRegression:
     def __init__(self,
                  learning_rate,
@@ -91,7 +96,7 @@ class LinearRegression:
 
     def sse(self, X, y):
         y_predicted = self.predict(X)
-        #print(y_predicted)
+        # print(y_predicted)
         return ((y_predicted - y)**2).sum()
 
     def rmse(self, X, y):
@@ -120,7 +125,7 @@ class LinearRegression:
         ]))
         plt.xlabel("Epochs")
         plt.ylabel("Sum of Squared Errors")
-        plt.text(x=int(len(self.error_history)*0.6),
+        plt.text(x=int(len(self.error_history) * 0.6),
                  y=np.max(self.error_history) * 0.7,
                  s=r'RMSE={0:.3f}'.format(self.rmse(X, y)),
                  fontsize=20,
@@ -128,7 +133,7 @@ class LinearRegression:
                  weight='bold',
                  rotation=0,
                  backgroundcolor='#f0f0f0')
-        #plt.show()
+        # plt.show()
 
     def fit(self, X, y):
         # Setting the random seed for reproducability
@@ -170,6 +175,7 @@ class LinearRegression:
             print('SSE:', self.sse(X, y))
             self.plot_error_history(X, y)
 
+
 class PCA:
     def __init__(self, n_components):
         self.n_components = n_components
@@ -178,7 +184,7 @@ class PCA:
         self.mean = np.mean(X, axis=0)
         X = X - self.mean
 
-        covariance_matrix = np.cov(X, rowvar = 0)
+        covariance_matrix = np.cov(X, rowvar=0)
         eigen_values, eigen_vectors = np.linalg.eig(covariance_matrix)
 
         sorted_indexes = np.argsort(-eigen_values)
@@ -186,10 +192,11 @@ class PCA:
         eigen_vectors = eigen_vectors.T[sorted_indexes]
 
         # Choose principal components
-        self.principal_components = eigen_vectors[:self.n_components,:]
+        self.principal_components = eigen_vectors[:self.n_components, :]
 
         # Explained variance
-        self.explained_variance = [(i/np.sum(eigen_values))*100 for i in eigen_values[:self.n_components]]
+        self.explained_variance = [
+            (i / np.sum(eigen_values)) * 100 for i in eigen_values[:self.n_components]]
 
         # Cumulative explained variance
         self.total_explained_variance = np.cumsum(self.explained_variance)
@@ -199,20 +206,15 @@ class PCA:
         return np.dot(X, self.principal_components.T)
 
 
-import numpy as np
-from itertools import tee
-from tqdm.auto import tqdm
-
-
 class NNRegressor:
-    def __init__(self, layers, loss, learning_rate, max_iter):
+    def __init__(self, layers, loss, optimizer, learning_rate, max_iter):
         self.layers = layers
         self.loss = loss
         self.learning_rate = learning_rate
         self.max_iter = max_iter
         self.params = {}
-        self.hidden_layer = {} # accessible variable
-        self.gradient = {}
+        self.hidden_layer = {}  # accessible variable
+        self.optimizer = optimizer
 
     # Taken from itertools official documentation; itertools.pairwise deprecated
     def pairwise(self, iterable):
@@ -222,18 +224,15 @@ class NNRegressor:
         return zip(a, b)
 
     def init_params(self, layers):
+        initializer = tf.initializers.GlorotNormal(seed=1)
         for i, j in enumerate(list(self.pairwise(self.layers)), 1):
-            self.params['W_' + str(i)] = np.random.randn(j[1], j[0]) # weights
-            self.params['b_' + str(i)] = np.random.randn(j[1], 1) # biases
+            self.params['W_' + str(i)] = tf.Variable(
+                initializer(shape=(j[1], j[0])), name=str('W_' + str(i)))
+            self.params['b_' + str(i)] = tf.Variable(
+                tf.random.normal(shape=(j[1], 1)), name=str('b_' + str(i)))
 
-    def relu(self, z):
-        return np.maximum(0, z)
-
-    def relu_gradient(self, error_gradient, activation):
-        return np.multiply(error_gradient, np.int64(activation> 0))
-
-    def forward_prop(self, X, update_hidden = True):
-        hidden_layer = {} # local variable
+    def forward_propagation(self, X, update_hidden=True):
+        hidden_layer = {}  # local variable
         for i in range(1, len(self.layers)):
             # first layer, so the input data matrix will multiplied with the weight matrix
             # W_ is weights
@@ -241,12 +240,17 @@ class NNRegressor:
             # H_ is hidden output
             # A_ is activation output
             if i == 1:
-                hidden_layer['H_' + str(i)] = np.dot(self.params['W_' + str(i)], X) + self.params['b_' + str(i)]
-                hidden_layer['A_' + str(i)] = self.relu(hidden_layer['H_' + str(i)])
+                hidden_layer['H_' + str(i)] = tf.add(
+                    tf.matmul(self.params['W_' + str(i)], X), self.params['b_' + str(i)])
+                hidden_layer['A_' +
+                             str(i)] = tf.nn.relu(hidden_layer['H_' + str(i)])
             else:
-                hidden_layer['H_' + str(i)] = np.dot(self.params['W_' + str(i)], hidden_layer['A_' + str(i - 1)]) + self.params['b_' + str(i)]
+                hidden_layer['H_' + str(i)] = tf.add(tf.matmul(self.params['W_' + str(
+                    i)], hidden_layer['A_' + str(i - 1)]), self.params['b_' + str(i)])
+
                 if i != (len(self.layers) - 1):
-                    hidden_layer['A_' + str(i)] = self.relu(hidden_layer['H_' + str(i)])
+                    hidden_layer['A_' +
+                                 str(i)] = tf.nn.relu(hidden_layer['H_' + str(i)])
                 else:
                     hidden_layer['A_' + str(i)] = hidden_layer['H_' + str(i)]
             if update_hidden:
@@ -255,37 +259,26 @@ class NNRegressor:
                 return hidden_layer
 
     def predict(self, X):
-        hidden_layer = self.forward_prop(X, update_hidden = False)
+        hidden_layer = self.forward_propagation(X, update_hidden=False)
         return hidden_layer['A_' + str(len(self.layers) - 1)]
 
-    def sse(self, X, y):
-        y_predicted = self.predict(X)
-        #print(y_predicted)
-        return 0.5 * ((y_predicted - y)**2).sum()
+    def backward_propagation(self, zip_grads_params):
+        if self.optimizer == 'adam':
+            optimizer = tf.keras.optimizers.Adam(
+                learning_rate=self.learning_rate)
+            optimizer.apply_gradients(zip_grads_params)
 
-    def sse_gradient(self, y, index_):
-        y_predicted = self.hidden_layer['A_' + str(index_)]
-        return (y_predicted - y)
+    def compute_cost(self, X, y):
+        y_predicted = self.predict(X)[0]
+        cost = tf.reduce_sum(
+            (y_predicted - tf.convert_to_tensor(y, np.float32))**2)
+        return cost
 
-    def rmse(self, X, y):
-        return np.sqrt((self.sse(X, y)) / X.shape[0])
-
-    # for backprop use self.hidden_layer
-    def backward_prop(self, X, y):
-        for i in reversed(range(1, len(self.layers))):
-            if i == (len(self.layers) - 1):
-                error_gradient = self.sse_gradient(y, i)
-                input_gradient = error_gradient # for last layer there is no activation
-            else:
-                error_gradient = np.dot(self.params['W_' + str(i+1)].T, input_gradient)
-                input_gradient = self.relu_gradient(error_gradient, self.hidden_layer['A_' + str(i)])
-            if i == 1:
-                self.gradient['W_' + str(i)] = np.dot(input_gradient, X.T)
-                self.gradient['b_' + str(i)] = np.sum(input_gradient, axis = 1, keepdims = True)
-            else:
-                previous_layer_activation = self.hidden_layer['A_' + str(i - 1)].T
-                self.gradient['W_' + str(i)] = np.dot(input_gradient, previous_layer_activation)
-                self.gradient['b_' + str(i)] = np.sum(input_gradient, axis = 1, keepdims = True)
+    def get_grad(self, X, y):
+        with tf.GradientTape() as tape:
+            self.forward_propagation(X, update_hidden=True)
+            loss_value = self.compute_cost(X, y)
+        return [tape.gradient(loss_value, list(self.params.values())), loss_value]
 
     def stochastic_gradient_descent(self, X, y, data_subset):
         self.error_history = []
@@ -294,21 +287,22 @@ class NNRegressor:
             index = np.random.choice(X.shape[0],
                                      int(data_subset * X.shape[0]),
                                      replace=False)
-            # Propogate forward
-            self.forward_prop(X[index].T, update_hidden = True)
-            # Compute loss
-            current_error = self.rmse(X[index].T, y[index].T)
+
+            grads, current_error = self.get_grad(X[index].T, y[index])
+            zip_grads_params = zip(grads, list(self.params.values()))
+
+            y_pred = self.predict(X[index].T)[0]
+
+            rmse_error = mean_squared_error(tf.convert_to_tensor(
+                y[index], np.float32), y_pred, squared=False)
+
             # Backpropagation
-            self.backward_prop(X[index].T, y[index].T)
+            self.backward_propagation(zip_grads_params)
 
-            # Gradient descent
-            for i in range(1, len(self.layers)):
-                self.params['W_' + str(i)] = self.params['W_' + str(i)] - self.learning_rate * self.gradient['W_' + str(i)]
-                self.params['b_' + str(i)] = self.params['b_' + str(i)] - self.learning_rate * self.gradient['b_' + str(i)]
+            print('Iteration:' + str(iter_) + ' sse = ' +
+                  str(current_error.numpy()) + '  |  ' + ' rmse = ' + str(rmse_error) + '\n')
 
-            print('Iteration:' + str(iter_) + ' rmse = ' + str(current_error) + '\n')
-
-            self.error_history.append(current_error)
+            self.error_history.append(rmse_error)
 
     def fit(self, X, y, data_subset):
         # First we initialize paramerters
